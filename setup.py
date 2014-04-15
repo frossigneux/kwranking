@@ -1,8 +1,7 @@
 #!/usr/bin/python
-#!/usr/bin/env python
 # -*-coding:utf-8 -*
 #
-# Author: François Rossigneux <francois.rossigneux@inria.fr>
+# Author: Mouchel Thomas <thomspirit@gmail.com>
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -19,5 +18,5 @@
 import setuptools
 
 setuptools.setup(
-    setup_requires=['d2to1>=0.2.10,<0.3', 'pbr>=0.5,<0.6'],
-    d2to1=True)
+    setup_requires=['pbr'],
+    pbr=True)

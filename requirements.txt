@@ -1,0 +1,10 @@
+d2to1>=0.2.10,<0.3
+eventlet
+flask
+iso8601
+kombu
+oslo.config
+pbr>=0.5,<0.6
+pysnmp
+python-keystoneclient
+webob
