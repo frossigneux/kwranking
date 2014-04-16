@@ -52,11 +52,11 @@ def make_app():
     @app.before_request
     def attach_config():
         flask.request.collector = collector
-        collector.lock.acquire()
+        collector['lock'].acquire()
 
     @app.after_request
     def unlock(response):
-        collector.lock.release()
+        collector['lock'].release()
         return response
 
     # Install the middleware wrapper

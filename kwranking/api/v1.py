@@ -17,8 +17,6 @@
 """This blueprint defines all URLs and answers."""
 
 import flask
-from operator  import attrgetter
-from itertools import islice
 import random
 
 blueprint = flask.Blueprint('v1', __name__)
@@ -36,26 +34,21 @@ def rank_hosts_list():
         return flask.jsonify({"error": True, "message": "Bad request method, must be <POST>."})
 
     try:
-        hosts       = flask.request.form["hosts"].split()
+        hosts       = flask.request.form["hosts"].split() if(flask.request.form["hosts"] != "*") else flask.request.collector['database'].keys()
         method      = flask.request.form["method"]
         number      = int(flask.request.form["number"])
     except:
         return flask.jsonify({"error": True, "message": "Missing arguments <hosts>, <method>, <number>."})
 
-    hosts_db    = {}
-    hosts_alone = {}
-    for host in hosts:
-        if(host in flask.request.collector.database.keys()):
-            hosts_db[host] = flask.request.collector.database[host]
-        else:
-            hosts_alone[host] = host
-    try:
-        hosts_final = sorted(hosts_db, key=lambda x: hosts_db[x][method], reverse= True if(method == "Flop" or method == "Efficiency") else False)[:number]
-    except Exception, e:
-        return flask.jsonify({"error": True, "message": "Unknow method: " + e.message})
+    if(flask.request.collector.isSorted(method) != True):
+        flask.request.collector.sort(method)
+
+    hosts_db    = flask.request.collector['list'][method]
+    hosts_final = filter(lambda x: x in hosts, hosts_db)
+    hosts_alone = list(set(hosts_db) - set(hosts_final))
 
     message = {}
-    message['hosts'] = hosts_final
+    message['hosts'] = (hosts_final + hosts_alone)[:number]
     return flask.jsonify(message)
 
 @blueprint.route('/hosts/set/', methods=["POST"])
@@ -63,7 +56,7 @@ def add_hosts_list():
     """Put new Host to list"""
     if (flask.request.method == 'POST'):
         if("host" in flask.request.form):
-            flask.request.collector.add(flask.request.form['host'], random.randint(1, 1000), random.randint(1, 1000), random.uniform(0, 5))
+            flask.request.collector.add(flask.request.form['host'], random.randint(1, 500), random.randint(500, 1000), random.uniform(0, 5))
             return flask.jsonify({"error": False, "message": "Operation successful."})
         else:
             return flask.jsonify({"error": True, "message": "Missing argument <host>."})
@@ -73,7 +66,7 @@ def get_hosts(host):
     """Return host informations"""
     message = {}
     try:
-        message[host] = flask.request.collector.database[host]
+        message[host] = flask.request.collector['database'][host]
     except KeyError:
         flask.abort(404)
     return flask.jsonify(hosts=message)
@@ -82,12 +75,12 @@ def get_hosts(host):
 def get_hosts_list():
     """Return list of hosts (detailed)"""
     message = {}
-    for host in flask.request.collector.database.keys():
-        message[host] = flask.request.collector.database[host]
+    for host in flask.request.collector['database'].keys():
+        message[host] = flask.request.collector['database'][host]
     return flask.jsonify(hosts=message)
 
 @blueprint.route('/hosts/get-id/')
 def get_hosts_id_list():
     """Return list of hosts (id)"""
-    return flask.jsonify(hosts=flask.request.collector.database.keys())
+    return flask.jsonify(hosts=flask.request.collector['database'].keys())
 

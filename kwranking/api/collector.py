@@ -35,29 +35,47 @@ class Record(dict):
         self['Flop']        = flop
         self['Efficiency']  = flop / wmax
 
-class Collector:
-    """Collector gradually fills its database with received values from
-    Cilometer and Climate API
-
-    """
+class Collector(dict):
+    """Collector gradually fills its database with received values from Cilometer and Climate API"""
 
     def __init__(self):
-        """Initializes an empty database and start listening the endpoint."""
-        self.database = {}
-        self.lock = threading.Lock()
+        """Initializes an empty database."""
+        self._dict       = {}
+        self['database'] = {}
+        self['lock']     = threading.Lock()
+        self['list']     = {}
+        self['sorted']   = {}
 
     def add(self, host, wmin, wmax, flop):
         """Creates (or updates) ranking data for this host."""
-        if host in self.database.keys():
-            self.database[host].update(wmin, wmax, flop)
+        if host in self['database'].keys():
+            self['database'][host].update(wmin, wmax, flop)
         else:
             record = Record(wmin, wmax, flop)
-            self.database[host] = record
+            self['database'][host] = record
+        for method in self['sorted']:
+            self['sorted'][method] = False
 
     def remove(self, host):
         """Removes this host from database."""
         try:
-            del self.database[host]
+            del self['database'][host]
             return True
         except KeyError:
             return False
+
+    def isSorted(self, method):
+        """Return if list <method> is sorted"""
+        return method in self['sorted']
+
+    def sort(self, method):
+        """Sort database by <method>."""
+        try:
+            hosts_final = sorted(self['database'], key=lambda x: self['database'][x][method], 
+                                                reverse= True if(method == "Flop" or method == "Efficiency") else False)
+        except Exception, e:
+            return False
+
+        self['list'][method]   = hosts_final
+        self['sorted'][method] = True
+        return True
