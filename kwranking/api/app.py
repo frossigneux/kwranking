@@ -23,8 +23,8 @@ import flask
 from oslo.config import cfg
 
 from kwranking.openstack.common import log
+from storage import Storage
 import acl
-from collector import Collector
 import v1
 
 LOG = log.getLogger(__name__)
@@ -42,21 +42,22 @@ cfg.CONF.register_opts(app_opts)
 
 
 def make_app():
-    """Instantiates Flask app, attaches collector database, installs acl."""
+    """Instantiates Flask app, attaches Storage database, installs acl."""
     LOG.info('Starting API')
     app = flask.Flask(__name__)
     app.register_blueprint(v1.blueprint, url_prefix='/v1')
 
-    collector = Collector()
+    storage = Storage()
+    storage.refresh()
 
     @app.before_request
     def attach_config():
-        flask.request.collector = collector
-        collector['lock'].acquire()
+        flask.request.storage = storage
+        storage['lock'].acquire()
 
     @app.after_request
     def unlock(response):
-        collector['lock'].release()
+        storage['lock'].release()
         return response
 
     # Install the middleware wrapper
@@ -72,5 +73,6 @@ def start():
              default_config_files=['/etc/kwranking/kwranking.conf']
              )
     log.setup('kwranking')
+
     root = make_app()
     root.run(host='0.0.0.0', port=cfg.CONF.api_port)

@@ -33,7 +33,6 @@ def register_opts(conf):
                        )
     auth_token.CONF = conf
 
-
 register_opts(cfg.CONF)
 
 
