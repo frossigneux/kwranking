@@ -16,10 +16,12 @@
 
 import threading
 import time
-import random
+import sys
+import os
 
 from oslo.config import cfg
 from ceilometerclient import client as ceilometer_client
+from execo import Host, Remote, Put, logger
 import keystoneclient.middleware.auth_token as auth_token
 import keystoneclient.v2_0 as keystone_client
 
@@ -29,9 +31,10 @@ app_opts = [
                ),
 ]
 
+#logger.setLevel('DEBUG')
 cfg.CONF.register_opts(app_opts)
 
-class Host(dict):
+class Info(dict):
     """Contains fields (Wmin, Wmax, Flop) """
 
     def __init__(self, wmin, wmax, flop):
@@ -62,10 +65,10 @@ class Storage(dict):
         self['database'] = {}
         self['list']     = {}
         self['sorted']   = {}
-        self['wait']     = []
+        self['wait']     = ['140.77.13.82']
 
     def wait(self, host):
-        """Add host id to waiting list"""
+        """Add host to waiting list"""
         self['wait'].append(host)
 
     def add(self, host, wmin, wmax, flop):
@@ -73,9 +76,8 @@ class Storage(dict):
         if host in self['database'].keys():
             self['database'][host].update(wmin, wmax, flop)
         else:
-            record = Host(wmin, wmax, flop)
+            record = Info(wmin, wmax, flop)
             self['database'][host] = record
-
         for method in self['sorted']:
             self['sorted'][method] = False
 
@@ -104,15 +106,39 @@ class Storage(dict):
         return True
 
     def refresh(self):
-
-        # Host information will be collected
-        def run_test(host_id):
+        # Host consumption will be collected
+        def consumption(host_id):
             info = ceilo.statistics.list('power', q=[{'field':'resource', 'op':'eq', 'value':host_id}])
             if(len(info) >= 1):
                 wmax = info[0].max
                 wmin = info[0].min
-                flop = random.uniform(0, 5)
+                flop = -1
                 self.add(host_id, wmin, wmax, flop)
+
+        # Host benchmark result will be collected
+        def benchmark(host_list):
+            bench_list = {}
+            for host_id in host_list:
+                bench_list[host_id] = Host(host_id, port=8001)
+
+            logger.info('Put Benchmarking Files on Host')
+            file_path = os.path.join(os.path.dirname(__file__), '../resources/unixbench-5.1.3.tgz')
+            bench_copy = Put(bench_list.values(), [file_path], "/tmp/", {'user':'jp'}).run()
+
+            logger.info('Starting benchmarking on host')
+            bench_install = Remote( 'cd /tmp/ &&'                     + \
+                                    'tar xvfz unixbench-5.1.3.tgz &&' + \
+                                    'cd unixbench-5.1.3/ &&'          + \
+                                    './Run arithmetic &&'             + \
+                                    'cd ../ &&'                       + \
+                                    'rm -rf unixbench-5.1.3/ &&'      + \
+                                    'rm -rf unixbench-5.1.3.tgz',
+                                    bench_list.values(), {'user':'jp'})
+
+            for p in bench_install.processes:
+                p.shell = True
+                p.stdout_handlers.append(sys.stdout)
+            bench_install.start()
 
         # Keystone identification
         ks = keystone_client.Client(username=cfg.CONF.keystone_authtoken['admin_user'],
@@ -130,15 +156,17 @@ class Storage(dict):
         for host_id in self['database']:
             host = self['database'][host_id]
             if( int(round(time.time() - host['Timestamp'])) >= cfg.CONF.refresh_interval):
-                run_test(host_id)
+                consumption(host_id)
 
         # Waiting list
         remove_list = []
-        for host_id in self['wait']:
-            info = ceilo.statistics.list('power', q=[{'field':'resource', 'op':'eq', 'value':host_id}])
-            if(len(info) >= 1):
-                run_test(host_id)
-                remove_list.append(host_id)
+        if(len(self['wait']) > 0):
+            for host_id in self['wait']:
+                info = ceilo.statistics.list('power', q=[{'field':'resource', 'op':'eq', 'value':host_id}])
+                if(len(info) >= 1):
+                    consumption(host_id)
+                    remove_list.append(host_id)
+            benchmark(remove_list)
 
         self['wait'] = list(set(self['wait']) - set(remove_list))
 

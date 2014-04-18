@@ -17,7 +17,6 @@
 """This blueprint defines all URLs and answers."""
 
 import flask
-import random
 
 blueprint = flask.Blueprint('v1', __name__)
 
@@ -34,7 +33,7 @@ def rank_hosts_list():
         return flask.jsonify({"error": True, "message": "Bad request method, must be <POST>."})
 
     try:
-        hosts       = flask.request.form["hosts"].split() if(flask.request.form["hosts"] != "*") else flask.request.storage['database'].keys()
+        hosts       = flask.request.form["hosts"].split(";") if(flask.request.form["hosts"] != "*") else flask.request.storage['database'].keys()
         method      = flask.request.form["method"]
         number      = int(flask.request.form["number"])
     except:
@@ -57,16 +56,6 @@ def rank_hosts_list():
 
 @blueprint.route('/hosts/set/', methods=["POST"])
 def add_hosts_list():
-    """Put new Host to list"""
-    if (flask.request.method == 'POST'):
-        if("host" in flask.request.form and len(flask.request.form['host']) >= 1):
-            flask.request.storage.add(flask.request.form['host'], random.randint(1, 500), random.randint(500, 1000), random.uniform(0, 5))
-            return flask.jsonify({"error": False, "message": "Operation successful."})
-        else:
-            return flask.jsonify({"error": True, "message": "Missing argument <host>."})
-
-@blueprint.route('/hosts/wait/', methods=["POST"])
-def add_waiting_list():
     """Put new Host to list"""
     if (flask.request.method == 'POST'):
         if("host" in flask.request.form):
