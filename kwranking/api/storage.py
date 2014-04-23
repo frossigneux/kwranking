@@ -25,19 +25,20 @@ from execo import Host, Remote, Put, logger
 import keystoneclient.middleware.auth_token as auth_token
 import keystoneclient.v2_0 as keystone_client
 
+from kwranking.api.benchmark import Benchmark
+
 app_opts = [
     cfg.IntOpt('refresh_interval',
                required=True,
                ),
 ]
 
-#logger.setLevel('DEBUG')
 cfg.CONF.register_opts(app_opts)
 
 class Info(dict):
     """Contains fields (Wmin, Wmax, Flop) """
 
-    def __init__(self, wmin, wmax, flop):
+    def __init__(self, wmin, wmax, flop = -1):
         """Initializes fields with the given arguments."""
         dict.__init__(self)
         self._dict          = {}
@@ -55,6 +56,10 @@ class Info(dict):
         self['Efficiency']  = flop / wmax
         self['Timestamp']   = int(round(time.time()))
 
+    def set(self, index, value):
+        self[index]         = value
+        self['Efficiency']  = self['Flop'] / self['Wmax']
+
 class Storage(dict):
     """Storage gradually fills its database with received values from Ceilometer and Climate API"""
 
@@ -65,13 +70,13 @@ class Storage(dict):
         self['database'] = {}
         self['list']     = {}
         self['sorted']   = {}
-        self['wait']     = ['140.77.13.82']
+        self['wait']     = []
 
     def wait(self, host):
         """Add host to waiting list"""
         self['wait'].append(host)
 
-    def add(self, host, wmin, wmax, flop):
+    def add(self, host, wmin, wmax, flop = -1):
         """Creates (or updates) ranking data for this host."""
         if host in self['database'].keys():
             self['database'][host].update(wmin, wmax, flop)
@@ -80,6 +85,16 @@ class Storage(dict):
             self['database'][host] = record
         for method in self['sorted']:
             self['sorted'][method] = False
+
+    def set(self, host, index, value):
+        """Creates (or updates) ranking data for this host."""
+        if host in self['database'].keys():
+            self['database'][host].set(index, value)
+            method_list = [index]
+            if(index == "Flop" or index == "Wmax"): 
+                method_list.append("Efficiency") 
+            for method in method_list:
+                self['sorted'][method] = False
 
     def remove(self, host):
         """Removes this host from database."""
@@ -106,45 +121,27 @@ class Storage(dict):
         return True
 
     def refresh(self):
-        # Host consumption will be collected
         def consumption(host_id):
-            info = ceilo.statistics.list('power', q=[{'field':'resource', 'op':'eq', 'value':host_id}])
+            """Host consumption will be collected"""
+            host = host_id.split(':')
+            info = ceilo.statistics.list('power', q=[{ 'field':'resource', 'op':'eq', 'value':host[0] }])
             if(len(info) >= 1):
                 wmax = info[0].max
                 wmin = info[0].min
-                flop = -1
-                self.add(host_id, wmin, wmax, flop)
+                self.add(host_id, wmin, wmax)
+                return True
+            return False
 
-        # Host benchmark result will be collected
-        def benchmark(host_list):
-            bench_list = {}
-            for host_id in host_list:
-                bench_list[host_id] = Host(host_id, port=8001)
-
-            logger.info('Put Benchmarking Files on Host')
-            file_path = os.path.join(os.path.dirname(__file__), '../resources/unixbench-5.1.3.tgz')
-            bench_copy = Put(bench_list.values(), [file_path], "/tmp/", {'user':'jp'}).run()
-
-            logger.info('Starting benchmarking on host')
-            bench_install = Remote( 'cd /tmp/ &&'                     + \
-                                    'tar xvfz unixbench-5.1.3.tgz &&' + \
-                                    'cd unixbench-5.1.3/ &&'          + \
-                                    './Run arithmetic &&'             + \
-                                    'cd ../ &&'                       + \
-                                    'rm -rf unixbench-5.1.3/ &&'      + \
-                                    'rm -rf unixbench-5.1.3.tgz',
-                                    bench_list.values(), {'user':'jp'})
-
-            for p in bench_install.processes:
-                p.shell = True
-                p.stdout_handlers.append(sys.stdout)
-            bench_install.start()
+        def benchmark_result(host_id, value):
+            """Benchmark return value from host"""
+            print("Benchmark result for " + host_id + " : " + str(value))
+            self.set(host_id, 'Flop', value)
 
         # Keystone identification
-        ks = keystone_client.Client(username=cfg.CONF.keystone_authtoken['admin_user'],
-                        password=cfg.CONF.keystone_authtoken['admin_password'],
-                        tenant_name=cfg.CONF.keystone_authtoken['admin_tenant_name'],
-                        auth_url=cfg.CONF.keystone_authtoken['auth_uri'])
+        ks = keystone_client.Client(username=   cfg.CONF.keystone_authtoken['admin_user'],
+                                    password=   cfg.CONF.keystone_authtoken['admin_password'],
+                                    tenant_name=cfg.CONF.keystone_authtoken['admin_tenant_name'],
+                                    auth_url=   cfg.CONF.keystone_authtoken['auth_uri'])
 
         endpoint = ks.service_catalog.url_for(service_type='metering',
                                               endpoint_type='publicURL')
@@ -162,11 +159,10 @@ class Storage(dict):
         remove_list = []
         if(len(self['wait']) > 0):
             for host_id in self['wait']:
-                info = ceilo.statistics.list('power', q=[{'field':'resource', 'op':'eq', 'value':host_id}])
-                if(len(info) >= 1):
-                    consumption(host_id)
+                if(consumption(host_id)):
                     remove_list.append(host_id)
-            benchmark(remove_list)
+            bench = Benchmark(remove_list, benchmark_result)
+            bench.start()
 
         self['wait'] = list(set(self['wait']) - set(remove_list))
 

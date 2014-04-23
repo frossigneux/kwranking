@@ -43,12 +43,15 @@ def rank_hosts_list():
         flask.request.storage.sort(method)
 
     try:
-        hosts_db    = flask.request.storage['list'][method]
+        hosts_db = flask.request.storage['list'][method]
     except:
         return flask.jsonify({"error": True, "message": "Unknow <method>."})
 
     hosts_final = filter(lambda x: x in hosts, hosts_db)
-    hosts_alone = list(set(hosts_db) - set(hosts_final))
+    hosts_alone = list(set(hosts) - set(hosts_final))
+
+    for host in hosts_alone:
+        flask.request.storage.wait(host)
 
     message = {}
     message['hosts'] = (hosts_final + hosts_alone)[:number]
