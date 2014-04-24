@@ -61,7 +61,7 @@ class Info(dict):
         self['Wmax']            = wmax
         if(flop != -1) :
             self['Flop']        = flop
-        self['Efficiency']      = flop / wmax
+        self['Efficiency']      = self['Flop'] / wmax
         self['Timestamp']       = int(round(time.time()))
 
     def set(self, index, value):
