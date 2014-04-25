@@ -19,42 +19,50 @@ import time
 import sys
 import os
 
-from oslo.config import cfg
+from oslo.config      import cfg
 from ceilometerclient import client as ceilometer_client
-from execo import Host, Remote, Put, logger
+from execo            import Host, Remote, Put, logger
 import keystoneclient.middleware.auth_token as auth_token
-import keystoneclient.v2_0 as keystone_client
+import keystoneclient.v2_0                  as keystone_client
 
 from kwranking.api.benchmark import Benchmark
+from kwranking.api.database  import SqlDatabase
 
 app_opts = [
     cfg.IntOpt('refresh_interval',
                required=True,
                ),
 ]
-
 cfg.CONF.register_opts(app_opts)
 
 class Info(dict):
     """Contains fields (Wmin, Wmax, Flop) """
 
-    def __init__(self, wmin, wmax, flop = -1):
+    def __init__(self, wmin, wmax, flop = -1, Efficiency = False, Timestamp = False):
         """Initializes fields with the given arguments."""
         dict.__init__(self)
         self._dict          = {}
         self['Wmin']        = wmin
         self['Wmax']        = wmax
         self['Flop']        = flop
-        self['Efficiency']  = flop / wmax
-        self['Timestamp']   = int(round(time.time()))
+
+        if(not Efficiency):
+            self['Efficiency'] = flop / wmax
+        else:
+            self['Efficiency'] = Efficiency
+        if(not Timestamp):
+            self['Timestamp']  = int(round(time.time()))
+        else:
+            self['Timestamp']  = Timestamp
 
     def update(self, wmin, wmax, flop):
         """Update field with the given arguments."""
-        self['Wmin']        = wmin
-        self['Wmax']        = wmax
-        self['Flop']        = flop
-        self['Efficiency']  = flop / wmax
-        self['Timestamp']   = int(round(time.time()))
+        self['Wmin']            = wmin
+        self['Wmax']            = wmax
+        if(flop != -1) :
+            self['Flop']        = flop
+        self['Efficiency']      = self['Flop'] / wmax
+        self['Timestamp']       = int(round(time.time()))
 
     def set(self, index, value):
         self[index]         = value
@@ -67,10 +75,11 @@ class Storage(dict):
         """Initializes an empty database."""
         self._dict       = {}
         self['lock']     = threading.Lock()
-        self['database'] = {}
         self['list']     = {}
         self['sorted']   = {}
         self['wait']     = []
+        self['sql']      = SqlDatabase()
+        self['database'] = self['sql'].host_load()
 
     def wait(self, host):
         """Add host to waiting list"""
@@ -95,6 +104,7 @@ class Storage(dict):
                 method_list.append("Efficiency") 
             for method in method_list:
                 self['sorted'][method] = False
+            return self['database'][host]
 
     def remove(self, host):
         """Removes this host from database."""
@@ -129,25 +139,28 @@ class Storage(dict):
                 wmax = info[0].max
                 wmin = info[0].min
                 self.add(host_id, wmin, wmax)
+                to_save[host_id] = self['database'][host_id]
                 return True
             return False
 
         def benchmark_result(host_id, value):
             """Benchmark return value from host"""
             print("Benchmark result for " + host_id + " : " + str(value))
-            self.set(host_id, 'Flop', value)
+            host = {}
+            host[host_id] = self.set(host_id, 'Flop', value)
+            self['sql'].host_save(host)
+
+        # List of hosts to save and remove
+        to_save     = {}
+        remove_list = []
 
         # Keystone identification
         ks = keystone_client.Client(username=   cfg.CONF.keystone_authtoken['admin_user'],
                                     password=   cfg.CONF.keystone_authtoken['admin_password'],
                                     tenant_name=cfg.CONF.keystone_authtoken['admin_tenant_name'],
                                     auth_url=   cfg.CONF.keystone_authtoken['auth_uri'])
-
-        endpoint = ks.service_catalog.url_for(service_type='metering',
-                                              endpoint_type='publicURL')
-        
-        ceilo = ceilometer_client.Client('2', endpoint,
-                                 token=(lambda: ks.auth_token))
+        endpoint = ks.service_catalog.url_for(service_type='metering', endpoint_type='publicURL')
+        ceilo    = ceilometer_client.Client('2', endpoint, token=(lambda: ks.auth_token))
 
         # Database Update
         for host_id in self['database']:
@@ -156,7 +169,6 @@ class Storage(dict):
                 consumption(host_id)
 
         # Waiting list
-        remove_list = []
         if(len(self['wait']) > 0):
             for host_id in self['wait']:
                 if(consumption(host_id)):
@@ -164,7 +176,9 @@ class Storage(dict):
             bench = Benchmark(remove_list, benchmark_result)
             bench.start()
 
+        # Remove and Save
         self['wait'] = list(set(self['wait']) - set(remove_list))
+        self['sql'].host_save(to_save)
 
         # Schedule periodic execution of this function
         if cfg.CONF.refresh_interval > 0:
