@@ -106,6 +106,6 @@ class SqlDatabase:
 		records_list = self.session.query(HostTable).all()
 		hosts_list 	 = {}
 		for record in records_list:
-			hosts_list[record.Ip] = Info(record.Wmin, float(record.Wmax), float(record.Flop), float(record.Efficiency), int(record.Timestamp))
+			hosts_list[record.Ip] = Info(float(record.Wmin), float(record.Wmax), float(record.Flop), float(record.Efficiency), int(record.Timestamp))
 
 		return hosts_list
